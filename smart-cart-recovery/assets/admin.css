@@ -1,0 +1,20 @@
+/* Admin styles for Smart Cart Recovery Mailer */
+
+.scrm-wrap h1 {
+	margin-bottom: 20px;
+}
+
+.scrm-wrap .form-table th {
+	width: 200px;
+}
+
+.scrm-wrap .description {
+	color: #666;
+	font-style: italic;
+}
+
+.scrm-wrap table.widefat td,
+.scrm-wrap table.widefat th {
+	vertical-align: top;
+}
+

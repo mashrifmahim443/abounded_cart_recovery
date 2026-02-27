@@ -40,7 +40,8 @@ class Smart_Cart_Recovery_Abandoned_Cart {
 		add_action( 'woocommerce_after_checkout_validation', array( $this, 'capture_checkout_email' ), 10, 2 );
 		add_action( 'scrm_check_abandoned_carts', array( $this, 'process_abandoned_carts' ) );
 		add_action( 'init', array( $this, 'handle_recovery_link' ) );
-		add_action( 'woocommerce_order_status_changed', array( $this, 'mark_recovered_on_order' ), 10, 4 );
+		// When an order is actually created from checkout, this user should NOT be treated as abandoned.
+		add_action( 'woocommerce_checkout_order_processed', array( $this, 'clear_abandoned_on_order_created' ), 10, 3 );
 	}
 
 	/**
@@ -306,20 +307,17 @@ class Smart_Cart_Recovery_Abandoned_Cart {
 	}
 
 	/**
-	 * Mark cart as recovered when order is placed.
+	 * Clear abandoned records as soon as an order is created from checkout.
+	 * This means only visitors who NEVER place the order are kept.
 	 *
-	 * @param int      $order_id   Order ID.
-	 * @param string   $old_status Old status.
-	 * @param string   $new_status New status.
-	 * @param WC_Order $order      Order object.
+	 * Hook: woocommerce_checkout_order_processed.
+	 *
+	 * @param int   $order_id    Order ID.
+	 * @param array $posted_data Posted checkout data.
+	 * @param mixed $order       Order object (may be null depending on WC version).
 	 */
-	public function mark_recovered_on_order( $order_id, $old_status = '', $new_status = '', $order = null ) {
+	public function clear_abandoned_on_order_created( $order_id, $posted_data, $order ) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundInImplementedInterface
 		if ( ! $this->is_enabled() || ! $order_id ) {
-			return;
-		}
-
-		// Only treat as recovered when payment is completed.
-		if ( ! in_array( $new_status, array( 'processing', 'completed' ), true ) ) {
 			return;
 		}
 
@@ -340,8 +338,7 @@ class Smart_Cart_Recovery_Abandoned_Cart {
 
 		global $wpdb;
 
-		// Order completed successfully – clean up any abandoned entries for this email
-		// so we only keep users who did NOT finish purchase.
+		// As soon as an order exists for this email, clean up abandoned entries.
 		$wpdb->query(
 			$wpdb->prepare(
 				"DELETE FROM " . SCRM_DB_TABLE . " WHERE email = %s",

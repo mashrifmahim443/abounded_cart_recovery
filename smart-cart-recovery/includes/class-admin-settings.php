@@ -39,6 +39,7 @@ class Smart_Cart_Recovery_Admin_Settings {
 	private function __construct() {
 		add_action( 'admin_menu', array( $this, 'register_menu' ) );
 		add_action( 'admin_init', array( $this, 'register_settings' ) );
+		add_action( 'admin_init', array( $this, 'maybe_export_abandoned_carts' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 	}
 
@@ -307,9 +308,26 @@ class Smart_Cart_Recovery_Admin_Settings {
 			)
 		);
 
+		$export_url = wp_nonce_url(
+			add_query_arg(
+				array(
+					'page'         => 'scrm-abandoned-carts',
+					'scrm_export'  => 'csv',
+				),
+				admin_url( 'admin.php' )
+			),
+			'scrm_export_abandoned_carts'
+		);
+
 		?>
 		<div class="wrap scrm-wrap">
 			<h1><?php esc_html_e( 'Abandoned Carts', 'smart-cart-recovery' ); ?></h1>
+
+			<p>
+				<a href="<?php echo esc_url( $export_url ); ?>" class="button button-secondary">
+					<?php esc_html_e( 'Export Abandoned Carts (CSV)', 'smart-cart-recovery' ); ?>
+				</a>
+			</p>
 
 			<table class="widefat fixed striped">
 				<thead>
@@ -378,6 +396,92 @@ class Smart_Cart_Recovery_Admin_Settings {
 
 		</div>
 		<?php
+	}
+
+	/**
+	 * Maybe export abandoned carts as CSV for users who did not complete purchase.
+	 */
+	public function maybe_export_abandoned_carts() {
+		if ( ! is_admin() ) {
+			return;
+		}
+
+		if ( ! isset( $_GET['page'], $_GET['scrm_export'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			return;
+		}
+
+		if ( 'scrm-abandoned-carts' !== sanitize_text_field( wp_unslash( $_GET['page'] ) ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			return;
+		}
+
+		if ( 'csv' !== sanitize_text_field( wp_unslash( $_GET['scrm_export'] ) ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			return;
+		}
+
+		if ( ! current_user_can( 'manage_woocommerce' ) ) {
+			return;
+		}
+
+		check_admin_referer( 'scrm_export_abandoned_carts' );
+
+		global $wpdb;
+
+		// Only carts that have not been recovered (purchase not completed).
+		$carts = $wpdb->get_results(
+			"SELECT * FROM " . SCRM_DB_TABLE . " WHERE recovered = 0 AND email IS NOT NULL AND email != '' ORDER BY created_at DESC"
+		);
+
+		$filename = 'abandoned-carts-' . gmdate( 'Y-m-d-H-i-s' ) . '.csv';
+
+		nocache_headers();
+		header( 'Content-Type: text/csv; charset=utf-8' );
+		header( 'Content-Disposition: attachment; filename=' . $filename );
+
+		$output = fopen( 'php://output', 'w' );
+
+		// CSV header row.
+		fputcsv(
+			$output,
+			array(
+				'ID',
+				'Email',
+				'Cart Items',
+				'Cart Total',
+				'Date Added (GMT)',
+				'Email Sent',
+				'Recovered',
+			)
+		);
+
+		if ( ! empty( $carts ) ) {
+			foreach ( $carts as $cart ) {
+				$cart_data   = json_decode( $cart->cart_data, true );
+				$items       = ! empty( $cart_data['items'] ) && is_array( $cart_data['items'] ) ? $cart_data['items'] : array();
+				$items_names = array();
+
+				foreach ( $items as $item ) {
+					$name = isset( $item['name'] ) ? $item['name'] : '';
+					$qty  = isset( $item['quantity'] ) ? (int) $item['quantity'] : 1;
+					$items_names[] = $name . ' x ' . $qty;
+				}
+
+				fputcsv(
+					$output,
+					array(
+						$cart->id,
+						$cart->email,
+						implode( '; ', $items_names ),
+						$cart->cart_total,
+						$cart->created_at,
+						$cart->email_sent ? 'Yes' : 'No',
+						$cart->recovered ? 'Yes' : 'No',
+					)
+				);
+			}
+		}
+
+		fclose( $output );
+		exit;
 	}
 
 	/**

@@ -37,11 +37,10 @@ class Smart_Cart_Recovery_Abandoned_Cart {
 	 * Constructor.
 	 */
 	private function __construct() {
-		add_action( 'woocommerce_add_to_cart', array( $this, 'handle_add_to_cart' ), 10, 6 );
 		add_action( 'woocommerce_after_checkout_validation', array( $this, 'capture_checkout_email' ), 10, 2 );
 		add_action( 'scrm_check_abandoned_carts', array( $this, 'process_abandoned_carts' ) );
 		add_action( 'init', array( $this, 'handle_recovery_link' ) );
-		add_action( 'woocommerce_thankyou', array( $this, 'mark_recovered_on_order' ), 10, 1 );
+		add_action( 'woocommerce_order_status_changed', array( $this, 'mark_recovered_on_order' ), 10, 4 );
 	}
 
 	/**
@@ -52,28 +51,6 @@ class Smart_Cart_Recovery_Abandoned_Cart {
 	protected function is_enabled() {
 		$settings = scrm_get_settings();
 		return ! empty( $settings['enabled'] );
-	}
-
-	/**
-	 * Handle add to cart event.
-	 *
-	 * @param string $cart_item_key Cart item key.
-	 * @param int    $product_id Product ID.
-	 * @param int    $quantity Quantity.
-	 * @param int    $variation_id Variation ID.
-	 * @param array  $variation Variation.
-	 * @param array  $cart_item_data Additional data.
-	 */
-	public function handle_add_to_cart( $cart_item_key, $product_id, $quantity, $variation_id, $variation, $cart_item_data ) { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter
-		if ( ! $this->is_enabled() || is_admin() ) {
-			return;
-		}
-
-		if ( ! function_exists( 'WC' ) || ! WC()->cart ) {
-			return;
-		}
-
-		$this->maybe_store_cart();
 	}
 
 	/**
@@ -334,14 +311,25 @@ class Smart_Cart_Recovery_Abandoned_Cart {
 	/**
 	 * Mark cart as recovered when order is placed.
 	 *
-	 * @param int $order_id Order ID.
+	 * @param int      $order_id   Order ID.
+	 * @param string   $old_status Old status.
+	 * @param string   $new_status New status.
+	 * @param WC_Order $order      Order object.
 	 */
-	public function mark_recovered_on_order( $order_id ) {
+	public function mark_recovered_on_order( $order_id, $old_status = '', $new_status = '', $order = null ) {
 		if ( ! $this->is_enabled() || ! $order_id ) {
 			return;
 		}
 
-		$order = wc_get_order( $order_id );
+		// Only treat as recovered when payment is completed.
+		if ( ! in_array( $new_status, array( 'processing', 'completed' ), true ) ) {
+			return;
+		}
+
+		if ( ! $order instanceof WC_Order ) {
+			$order = wc_get_order( $order_id );
+		}
+
 		if ( ! $order ) {
 			return;
 		}

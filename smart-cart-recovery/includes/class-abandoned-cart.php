@@ -294,14 +294,11 @@ class Smart_Cart_Recovery_Abandoned_Cart {
 			}
 		}
 
-		$wpdb->update(
+		// User re-entered checkout via recovery link and will now purchase,
+		// so this entry no longer needs to be tracked as abandoned.
+		$wpdb->delete(
 			SCRM_DB_TABLE,
-			array(
-				'recovered' => 1,
-			),
-			array( 'id' => (int) $cart->id ),
-			array( '%d' ),
-			array( '%d' )
+			array( 'id' => (int) $cart->id )
 		);
 
 		wp_safe_redirect( wc_get_checkout_url() );
@@ -343,9 +340,11 @@ class Smart_Cart_Recovery_Abandoned_Cart {
 
 		global $wpdb;
 
+		// Order completed successfully – clean up any abandoned entries for this email
+		// so we only keep users who did NOT finish purchase.
 		$wpdb->query(
 			$wpdb->prepare(
-				"UPDATE " . SCRM_DB_TABLE . " SET recovered = 1 WHERE email = %s AND recovered = 0",
+				"DELETE FROM " . SCRM_DB_TABLE . " WHERE email = %s",
 				$email
 			)
 		);

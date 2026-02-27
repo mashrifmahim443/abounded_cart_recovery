@@ -40,6 +40,7 @@ class Smart_Cart_Recovery_Admin_Settings {
 		add_action( 'admin_menu', array( $this, 'register_menu' ) );
 		add_action( 'admin_init', array( $this, 'register_settings' ) );
 		add_action( 'admin_init', array( $this, 'maybe_export_abandoned_carts' ) );
+		add_action( 'admin_init', array( $this, 'maybe_delete_abandoned_carts' ) );
 		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 	}
 
@@ -297,12 +298,13 @@ class Smart_Cart_Recovery_Admin_Settings {
 		}
 		$offset = ( $paged - 1 ) * $per_page;
 
-		$total_items = (int) $wpdb->get_var( "SELECT COUNT(*) FROM " . SCRM_DB_TABLE );
+		// Only show carts where purchase has NOT been completed (recovered = 0).
+		$total_items = (int) $wpdb->get_var( "SELECT COUNT(*) FROM " . SCRM_DB_TABLE . " WHERE recovered = 0" );
 		$total_pages = $total_items > 0 ? ceil( $total_items / $per_page ) : 1;
 
 		$carts = $wpdb->get_results(
 			$wpdb->prepare(
-				"SELECT * FROM " . SCRM_DB_TABLE . " ORDER BY created_at DESC LIMIT %d OFFSET %d",
+				"SELECT * FROM " . SCRM_DB_TABLE . " WHERE recovered = 0 ORDER BY created_at DESC LIMIT %d OFFSET %d",
 				$per_page,
 				$offset
 			)
@@ -319,6 +321,17 @@ class Smart_Cart_Recovery_Admin_Settings {
 			'scrm_export_abandoned_carts'
 		);
 
+		$delete_url = wp_nonce_url(
+			add_query_arg(
+				array(
+					'page'            => 'scrm-abandoned-carts',
+					'scrm_delete_all' => 1,
+				),
+				admin_url( 'admin.php' )
+			),
+			'scrm_delete_abandoned_carts'
+		);
+
 		?>
 		<div class="wrap scrm-wrap">
 			<h1><?php esc_html_e( 'Abandoned Carts', 'smart-cart-recovery' ); ?></h1>
@@ -326,6 +339,9 @@ class Smart_Cart_Recovery_Admin_Settings {
 			<p>
 				<a href="<?php echo esc_url( $export_url ); ?>" class="button button-secondary">
 					<?php esc_html_e( 'Export Abandoned Carts (CSV)', 'smart-cart-recovery' ); ?>
+				</a>
+				<a href="<?php echo esc_url( $delete_url ); ?>" class="button button-secondary" onclick="return confirm('<?php echo esc_js( __( 'Are you sure you want to delete all abandoned cart records? This action cannot be undone.', 'smart-cart-recovery' ) ); ?>');">
+					<?php esc_html_e( 'Delete All Abandoned Data', 'smart-cart-recovery' ); ?>
 				</a>
 			</p>
 
@@ -481,6 +497,46 @@ class Smart_Cart_Recovery_Admin_Settings {
 		}
 
 		fclose( $output );
+		exit;
+	}
+
+	/**
+	 * Maybe delete all abandoned carts records.
+	 */
+	public function maybe_delete_abandoned_carts() {
+		if ( ! is_admin() ) {
+			return;
+		}
+
+		if ( ! isset( $_GET['page'], $_GET['scrm_delete_all'] ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			return;
+		}
+
+		if ( 'scrm-abandoned-carts' !== sanitize_text_field( wp_unslash( $_GET['page'] ) ) ) { // phpcs:ignore WordPress.Security.NonceVerification.Recommended
+			return;
+		}
+
+		if ( ! current_user_can( 'manage_woocommerce' ) ) {
+			return;
+		}
+
+		check_admin_referer( 'scrm_delete_abandoned_carts' );
+
+		global $wpdb;
+
+		// Delete all abandoned cart records.
+		$wpdb->query( 'DELETE FROM ' . SCRM_DB_TABLE ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+
+		// Redirect back to the listing page to avoid resubmission.
+		wp_safe_redirect(
+			add_query_arg(
+				array(
+					'page'    => 'scrm-abandoned-carts',
+					'deleted' => 1,
+				),
+				admin_url( 'admin.php' )
+			)
+		);
 		exit;
 	}
 
